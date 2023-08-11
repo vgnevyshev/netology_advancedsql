@@ -9,8 +9,7 @@ begin
 
 select count(v.vac_id) into vacancy_count  from position p
 left outer join vacancy v on v.pos_id  = p.pos_id  
-where lower(p.pos_title) = lower(pos_title_in) and v.create_date between date_from_in and date_to_in
-group by p.pos_title;
+where lower(p.pos_title) = lower(pos_title_in) and v.create_date between date_from_in and date_to_in;
 end;
 $$ language plpgsql;
 
@@ -30,7 +29,7 @@ begin
    end if;
 end;
 $$ language plpgsql;
-CREATE TRIGGER verify_grade BEFORE INSERT OR UPDATE ON position 
+CREATE TRIGGER verify_grade before INSERT OR UPDATE ON position 
     FOR EACH ROW when (NEW.grade is not null) EXECUTE FUNCTION verify_grade();
 
 insert into position(pos_id, pos_title, address_id, manager_pos_id, grade) values(4593, 'Temp position', 20, 4568, 4);
@@ -49,7 +48,7 @@ create table employee_salary_history (
 	emp_id int not null references employee(emp_id), 
 	salary_old int default 0, 
 	salary_new int not null,
-	difference int not null CONSTRAINT positive_price CHECK (difference > 0),
+	difference int not null,
 	last_update timestamp default current_timestamp
 	);
 
@@ -58,19 +57,26 @@ drop trigger if exists write_employee_salary_history on employee_salary;
 create or replace function write_employee_salary_history() returns trigger as $$
 declare oldsal int;
 begin 
-	--try to find the last HISTORY cortage
-	select salary_new into oldsal from employee_salary_history where emp_id = new.emp_id order by  last_update  desc limit 1;
-if (oldsal is null) then
---no history, lets find smth in the table
-	select salary into oldsal from employee_salary where emp_id = new.emp_id order by  order_id  asc  limit 1;
-end if; 
-insert into employee_salary_history (emp_id, salary_old, salary_new, difference)
-values (new.emp_id, oldsal, new.salary, new.salary - coalesce(oldsal, 0));
+if (TG_OP = 'INSERT') then --insert
+		raise notice 'insert changes in SALARY';
+	select salary into oldsal from employee_salary where emp_id = new.emp_id and order_id <> new.order_id order by  effective_from  desc limit 1;
+	insert into employee_salary_history (emp_id, salary_old, salary_new, difference)
+		values (new.emp_id, coalesce(oldsal, 0), new.salary, new.salary - coalesce(oldsal, 0));
+else
+	if (old.salary <> new.salary ) then
+			raise notice 'update changes in SALARY';
+		insert into employee_salary_history (emp_id, salary_old, salary_new, difference)
+			values (new.emp_id, old.salary, new.salary, new.salary - old.salary);
+	else 
+		raise notice 'No changes in SALARY';
+	end if;
+end if;
 return new;
 end;
-
 $$ language plpgsql;
-CREATE TRIGGER write_employee_salary_history before INSERT OR UPDATE ON employee_salary 
+
+
+CREATE TRIGGER write_employee_salary_history after INSERT OR UPDATE ON employee_salary 
     FOR EACH ROW EXECUTE FUNCTION write_employee_salary_history();
     
    
